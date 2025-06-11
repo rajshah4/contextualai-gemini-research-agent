@@ -4,7 +4,7 @@ from typing import Annotated, TypedDict
 
 from agent.tools_and_schemas import SearchQueryList, Reflection
 from dotenv import load_dotenv
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Send
 from langgraph.graph import StateGraph
 from langgraph.graph import START, END
@@ -48,28 +48,13 @@ genai_client = Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 # Nodes
 def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerationState:
-    """LangGraph node that generates a search queries based on the User's question.
-
-    Uses Gemini 2.0 Flash to create an optimized search query for web research based on
-    the User's question.
-
-    Args:
-        state: Current graph state containing the User's question
-        config: Configuration for the runnable, including LLM provider settings
-
-    Returns:
-        Dictionary with state update, including search_query key containing the generated query
-    """
-    # Add debug statement to track state in generate_query
+    """LangGraph node that generates search queries and determines research mode per query."""
     print(f"Debug: Generate Query - Topic: {get_research_topic(state['messages'])}")
-    
     configurable = Configuration.from_runnable_config(config)
 
-    # check for custom initial search query count
     if state.get("initial_search_query_count") is None:
         state["initial_search_query_count"] = configurable.number_of_initial_queries
 
-    # init Gemini 2.0 Flash
     llm = ChatGoogleGenerativeAI(
         model=configurable.query_generator_model,
         temperature=1.0,
@@ -78,17 +63,26 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
     )
     structured_llm = llm.with_structured_output(SearchQueryList)
 
-    # Format the prompt
     current_date = get_current_date()
     formatted_prompt = query_writer_instructions.format(
         current_date=current_date,
         research_topic=get_research_topic(state["messages"]),
         number_queries=state["initial_search_query_count"],
     )
-    # Generate the search queries
     result = structured_llm.invoke(formatted_prompt)
     print(f"Debug: Generated {len(result.query)} queries: {result.query}")
-    return {"query_list": result.query}
+
+    # Per-query tool selection
+    query_mode_list = []
+    for q in result.query:
+        # Use the same tool_selection logic, but for each query
+        tool_sel_state = {"messages": [HumanMessage(content=q)]}
+        tool_sel_result = tool_selection(tool_sel_state, config)
+        research_mode = tool_sel_result.get("research_mode", "web")
+        print(f"Debug: Tool selection for query '{q}': {research_mode}")
+        query_mode_list.append({"query": q, "research_mode": research_mode})
+
+    return {"query_mode_list": query_mode_list}
 
 
 def continue_to_web_research(state: QueryGenerationState):
@@ -117,18 +111,13 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
     Returns:
         Dictionary with state update, including sources_gathered, research_loop_count, and research_result
     """
-    # Extract the search query from the list
     search_query = state["search_query"][0] if isinstance(state["search_query"], list) else state["search_query"]
     print(f"Debug: Web Research - Query: {search_query}")
-    
-    # Configure
     configurable = Configuration.from_runnable_config(config)
     formatted_prompt = web_searcher_instructions.format(
         current_date=get_current_date(),
         research_topic=search_query,
     )
-
-    # Uses the google genai client as the langchain client doesn't return grounding metadata
     response = genai_client.models.generate_content(
         model=configurable.query_generator_model,
         contents=formatted_prompt,
@@ -137,27 +126,15 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
             "temperature": 0,
         },
     )
-    # resolve the urls to short urls for saving tokens and time
-    # Handle id as a list, take the first element
     id_value = state["id"][0] if isinstance(state["id"], list) and state["id"] else 0
     resolved_urls = resolve_urls(
         response.candidates[0].grounding_metadata.grounding_chunks, id_value
     )
     # Gets the citations and adds them to the generated text
     citations = get_citations(response, resolved_urls)
-    print(f"Debug: Web Research - Generated {len(citations)} citation groups")
-    for i, citation in enumerate(citations):
-        print(f"Debug: Citation {i}: {len(citation.get('segments', []))} segments")
-        for j, segment in enumerate(citation.get('segments', [])):
-            print(f"Debug: Segment {j}: label='{segment.get('label', 'N/A')}', short_url='{segment.get('short_url', 'N/A')}', value='{segment.get('value', 'N/A')}'")
-    
     modified_text = insert_citation_markers(response.text, citations)
-    print(f"Debug: Web Research - Modified text preview: {modified_text[:200]}...")
-    
     sources_gathered = [item for citation in citations for item in citation["segments"]]
-
     print(f"Debug: Web Research completed - {len(sources_gathered)} sources found")
-    
     return {
         "sources_gathered": sources_gathered,
         "search_query": [state["search_query"]],
@@ -179,6 +156,11 @@ def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
     Returns:
         Dictionary with state update, including search_query key containing the generated follow-up query
     """
+    # Debug: Print message types and values
+    messages = state.get("messages", [])
+    print(f"Debug: reflection called with {len(messages)} messages.")
+    for idx, msg in enumerate(messages):
+        print(f"  Message {idx}: type={type(msg)}, value={msg}")
     try:
         configurable = Configuration.from_runnable_config(config)
         # Increment the research loop count and get the reasoning model
@@ -323,21 +305,21 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
         
         # Replace the short urls with the original urls and add all used urls to the sources_gathered
         unique_sources = []
-        print(f"Debug: Available sources_gathered: {len(state['sources_gathered'])} sources")
-        
+        # Remove debug statements for URL replacement
+        # print(f"Debug: Available sources_gathered: {len(state['sources_gathered'])} sources")
+        # print(f"Debug: Checking source - short_url: {source['short_url']}, in content: {source['short_url'] in modified_content}")
+        # print(f"Debug: Replacing {source['short_url']} with {source['value']}")
+        # print(f"Debug: After URL replacement - content preview: {modified_content[:200]}...")
+        # print(f"Debug: Unique sources used: {len(unique_sources)}")
+
         modified_content = combined_research
         for source in state["sources_gathered"]:
-            print(f"Debug: Checking source - short_url: {source['short_url']}, in content: {source['short_url'] in modified_content}")
             if source["short_url"] in modified_content:
-                print(f"Debug: Replacing {source['short_url']} with {source['value']}")
                 modified_content = modified_content.replace(
                     source["short_url"], source["value"]
                 )
                 unique_sources.append(source)
         
-        print(f"Debug: After URL replacement - content preview: {modified_content[:200]}...")
-        print(f"Debug: Unique sources used: {len(unique_sources)}")
-
         # Create the final AI message with the preserved citations
         final_message = AIMessage(content=modified_content)
         
@@ -372,6 +354,35 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
 
         print(f"Debug: Answer finalized with {len(unique_sources)} web sources")
         
+        # Heuristic: classify source type
+        def classify_source(url):
+            rag_domains = [
+                "macrotrends.net", "companiesmarketcap.com", "nvidia.com", "tesla.com",
+                "stockanalysis.com", "investing.com", "wallstreetzen.com", "visiblealpha.com",
+                "stocktitan.net", "visualcapitalist.com", "analyzify.com", "globenewswire.com"
+            ]
+            if any(domain in url for domain in rag_domains):
+                return "rag"
+            return "web"
+
+        rag_count = 0
+        web_count = 0
+        for source in unique_sources:
+            url = source.get("value", "") or source.get("short_url", "")
+            if classify_source(url) == "rag":
+                rag_count += 1
+            else:
+                web_count += 1
+
+        if rag_count > web_count:
+            answer_type = "rag"
+        elif web_count > rag_count:
+            answer_type = "web"
+        else:
+            answer_type = "mixed"
+
+        final_message.additional_kwargs["answer_type"] = answer_type
+
         return {
             "messages": [final_message],
             "sources_gathered": unique_sources,
@@ -431,27 +442,22 @@ def rag_research(state: WebSearchState, config: RunnableConfig) -> dict:
 
 # Fan-out conditional edge function to create individual research tasks for each query
 def fan_out_queries(state: QueryGenerationState, config: RunnableConfig):
-    """Takes the list of queries and emits a list of Send objects, each with a single search_query and id."""
-    # Get research_mode from state, defaulting to 'rag'
-    research_mode = state.get("research_mode", "rag")
-    
-    # Add debug logging to see what's happening
-    print(f"Debug: Fan-out queries - research_mode: '{research_mode}', state keys: {list(state.keys())}")
-    
-    if research_mode == "web":
-        target_node = "web_research"
-        print(f"Debug: Fan-out queries - Routing to web_research")
-    elif research_mode == "rag":
-        target_node = "rag_research"
-        print(f"Debug: Fan-out queries - Routing to rag_research")
-    else:
-        target_node = "rag_research"  # Default fallback
-        print(f"Debug: Fan-out queries - Unknown mode '{research_mode}', defaulting to rag_research")
-    
-    return [
-        Send(target_node, {"search_query": [query], "id": [idx]})
-        for idx, query in enumerate(state["query_list"])
-    ]
+    """Takes the list of queries and emits a list of Send objects, each with a single search_query and id, routed per-query to the correct research node."""
+    query_mode_list = state.get("query_mode_list", [])
+    print(f"Debug: Fan-out queries - {len(query_mode_list)} queries with per-query research_mode")
+    sends = []
+    for idx, item in enumerate(query_mode_list):
+        query = item["query"]
+        research_mode = item["research_mode"]
+        if research_mode == "web":
+            target_node = "web_research"
+        elif research_mode == "rag":
+            target_node = "rag_research"
+        else:
+            target_node = "rag_research"  # fallback
+        print(f"Debug: Routing query '{query}' to {target_node}")
+        sends.append(Send(target_node, {"search_query": [query], "id": [idx]}))
+    return sends
 
 
 # Create our Agent Graph

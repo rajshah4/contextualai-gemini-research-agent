@@ -87,19 +87,35 @@ def query_rag_v3(prompt: str) -> dict:
 
 
 def get_research_topic(messages: List[AnyMessage]) -> str:
-    """
-    Get the research topic from the messages.
-    """
+    print(f"Debug: get_research_topic called with {len(messages)} messages.")
+    for idx, msg in enumerate(messages):
+        print(f"  Message {idx}: type={type(msg)}, value={msg}")
     # check if request has a history and combine the messages into a single string
     if len(messages) == 1:
-        research_topic = messages[-1].content
+        msg = messages[-1]
+        if hasattr(msg, 'content'):
+            research_topic = msg.content
+        elif isinstance(msg, dict) and "content" in msg:
+            research_topic = msg["content"]
+        else:
+            print(f"Warning: Message {msg} is not a HumanMessage, AIMessage, or dict with 'content'.")
+            research_topic = str(msg)
     else:
         research_topic = ""
         for message in messages:
-            if isinstance(message, HumanMessage):
-                research_topic += f"User: {message.content}\n"
-            elif isinstance(message, AIMessage):
-                research_topic += f"Assistant: {message.content}\n"
+            if hasattr(message, 'content'):
+                if isinstance(message, HumanMessage):
+                    research_topic += f"User: {message.content}\n"
+                elif isinstance(message, AIMessage):
+                    research_topic += f"Assistant: {message.content}\n"
+                else:
+                    print(f"Warning: Message {message} has 'content' but is not HumanMessage/AIMessage.")
+            elif isinstance(message, dict) and "content" in message:
+                research_topic += f"User: {message['content']}\n"
+            else:
+                print(f"Warning: Message {message} is not a HumanMessage, AIMessage, or dict with 'content'.")
+                research_topic += str(message) + '\n'
+    print(f"Debug: get_research_topic returning: {research_topic}")
     return research_topic
 
 
@@ -123,54 +139,39 @@ def resolve_urls(urls_to_resolve: List[Any], id: int) -> Dict[str, str]:
 def insert_citation_markers(text, citations_list):
     """
     Inserts citation markers into a text string based on start and end indices.
-
     Args:
         text (str): The original text string.
         citations_list (list): A list of dictionaries, where each dictionary
                                contains 'start_index', 'end_index', and
                                'segment_string' (the marker to insert).
                                Indices are assumed to be for the original text.
-
     Returns:
         str: The text with citation markers inserted.
     """
-    print(f"Debug: insert_citation_markers - Processing {len(citations_list)} citations")
-    print(f"Debug: Original text preview: {text[:200]}...")
-    
+    # print(f"Debug: insert_citation_markers - Processing {len(citations_list)} citations")
+    # print(f"Debug: Original text preview: {text[:200]}...")
     # Sort citations by end_index in descending order.
-    # If end_index is the same, secondary sort by start_index descending.
-    # This ensures that insertions at the end of the string don't affect
-    # the indices of earlier parts of the string that still need to be processed.
     sorted_citations = sorted(
         citations_list, key=lambda c: (c["end_index"], c["start_index"]), reverse=True
     )
-
     modified_text = text
     for i, citation_info in enumerate(sorted_citations):
-        # These indices refer to positions in the *original* text,
-        # but since we iterate from the end, they remain valid for insertion
-        # relative to the parts of the string already processed.
         end_idx = citation_info["end_index"]
         marker_to_insert = ""
         segments = citation_info.get("segments", [])
-        print(f"Debug: Citation {i}: {len(segments)} segments, end_idx={end_idx}")
-        
+        # print(f"Debug: Citation {i}: {len(segments)} segments, end_idx={end_idx}")
         for j, segment in enumerate(segments):
             label = segment.get('label', 'N/A')
             short_url = segment.get('short_url', 'N/A')
             marker = f" [{label}]({short_url})"
             marker_to_insert += marker
-            print(f"Debug: Segment {j}: label='{label}', short_url='{short_url}', marker='{marker}'")
-        
-        print(f"Debug: Citation {i}: inserting '{marker_to_insert}' at position {end_idx}")
-        print(f"Debug: Text around position {end_idx}: '{modified_text[max(0, end_idx-20):end_idx+20]}'")
-        
-        # Insert the citation marker at the original end_idx position
+            # print(f"Debug: Segment {j}: label='{label}', short_url='{short_url}', marker='{marker}'")
+        # print(f"Debug: Citation {i}: inserting '{marker_to_insert}' at position {end_idx}")
+        # print(f"Debug: Text around position {end_idx}: '{modified_text[max(0, end_idx-20):end_idx+20]}'")
         modified_text = (
             modified_text[:end_idx] + marker_to_insert + modified_text[end_idx:]
         )
-
-    print(f"Debug: Final modified text preview: {modified_text[:300]}...")
+    # print(f"Debug: Final modified text preview: {modified_text[:300]}...")
     return modified_text
 
 
@@ -260,7 +261,7 @@ def get_citations(response, resolved_urls_map):
                     else:
                         label = f"{ind + 1}"  # Fallback to number
                     
-                    print(f"Debug: get_citations - chunk {ind}: title='{title}', label='{label}', uri='{chunk.web.uri}', short_url='{resolved_url}'")
+                    # print(f"Debug: get_citations - chunk {ind}: title='{title}', label='{label}', uri='{chunk.web.uri}', short_url='{resolved_url}'")
                     
                     citation["segments"].append(
                         {
@@ -303,7 +304,7 @@ Use WEB for:
 
 Respond with only "RAG" or "WEB".
 
-User query: {query}
+User Query: {query}
 """
     # Use your reasoning model (e.g., Gemini, OpenAI, etc.)
     llm = ChatGoogleGenerativeAI(
