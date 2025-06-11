@@ -21,6 +21,14 @@ class OverallState(TypedDict):
     max_research_loops: int
     research_loop_count: int
     reasoning_model: str
+    research_mode: str  # 'web' or 'rag'
+    research_result: Annotated[list, operator.add]
+    id: Annotated[list, operator.add]
+    # RAG attribution fields
+    rag_attributions: Annotated[list, operator.add]
+    rag_retrieval_contents: Annotated[list, operator.add]
+    rag_message_id: Annotated[list, operator.add]
+    rag_agent_id: Annotated[list, operator.add]
 
 
 class ReflectionState(TypedDict):
@@ -29,6 +37,7 @@ class ReflectionState(TypedDict):
     follow_up_queries: Annotated[list, operator.add]
     research_loop_count: int
     number_of_ran_queries: int
+    research_mode: str  # Add this field to preserve research_mode
 
 
 class Query(TypedDict):
@@ -41,8 +50,8 @@ class QueryGenerationState(TypedDict):
 
 
 class WebSearchState(TypedDict):
-    search_query: str
-    id: str
+    search_query: Annotated[list, operator.add]
+    id: Annotated[list, operator.add]
 
 
 @dataclass(kw_only=True)

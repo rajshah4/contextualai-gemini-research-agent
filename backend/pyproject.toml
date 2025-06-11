@@ -17,7 +17,9 @@ dependencies = [
     "langgraph-cli",
     "langgraph-api",
     "fastapi",
+    "contextual-client",
     "google-genai",
+    "aiohttp",
 ]
 
 

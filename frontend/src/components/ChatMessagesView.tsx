@@ -20,6 +20,19 @@ type MdComponentProps = {
   [key: string]: any;
 };
 
+// Add types for RAG attribution data
+interface RagAttributionData {
+  attributions?: Array<{
+    content_ids?: string[];
+  }>;
+  retrieval_contents?: Array<{
+    content_id: string;
+    number: string | number;
+  }>;
+  message_id?: string;
+  agent_id?: string;
+}
+
 // Markdown components (from former ReportView.tsx)
 const mdComponents = {
   h1: ({ className, children, ...props }: MdComponentProps) => (
@@ -168,6 +181,7 @@ interface AiMessageBubbleProps {
   mdComponents: typeof mdComponents;
   handleCopy: (text: string, messageId: string) => void;
   copiedMessageId: string | null;
+  handleAttributionClick: (contentId: string, agentId: string, messageId: string) => void;
 }
 
 // AiMessageBubble Component
@@ -180,11 +194,52 @@ const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
   mdComponents,
   handleCopy,
   copiedMessageId,
+  handleAttributionClick,
 }) => {
   // Determine which activity events to show and if it's for a live loading message
   const activityForThisBubble =
     isLastMessage && isOverallLoading ? liveActivity : historicalActivity;
   const isLiveActivityForThisBubble = isLastMessage && isOverallLoading;
+
+  // Debug: Log the message object to see what data is available
+  console.log("Debug: Message object:", message);
+  console.log("Debug: Message keys:", Object.keys(message));
+
+  // Extract RAG attribution data from message if available
+  const ragAttributions = (message as any)?.additional_kwargs?.rag_attributions || [];
+  const ragRetrievalContents = (message as any)?.additional_kwargs?.rag_retrieval_contents || [];
+  const ragMessageId = (message as any)?.additional_kwargs?.rag_message_id;
+  const ragAgentId = (message as any)?.additional_kwargs?.rag_agent_id;
+
+  // Debug: Log extracted RAG data
+  console.log("Debug: ragAttributions:", ragAttributions);
+  console.log("Debug: ragRetrievalContents:", ragRetrievalContents);
+  console.log("Debug: ragMessageId:", ragMessageId);
+  console.log("Debug: ragAgentId:", ragAgentId);
+
+  // Process unique attributions - ragAttributions is an array of content_id strings
+  const uniqueAttributions: { content_id: string; number: string | number }[] = [];
+  const seen = new Set<string>();
+  
+  if (ragAttributions && ragAttributions.length > 0) {
+    // ragAttributions is already an array of content_id strings
+    ragAttributions.forEach((contentId: string) => {
+      if (!seen.has(contentId)) {
+        seen.add(contentId);
+        const retrieval = ragRetrievalContents.find((rc: any) => rc.content_id === contentId);
+        uniqueAttributions.push({ 
+          content_id: contentId, 
+          number: retrieval ? retrieval.number : contentId 
+        });
+      }
+    });
+  }
+
+  console.log("Debug: uniqueAttributions:", uniqueAttributions);
+
+  const messageContent = typeof message.content === "string" 
+    ? message.content 
+    : JSON.stringify(message.content);
 
   return (
     <div className={`relative break-words flex flex-col`}>
@@ -196,22 +251,73 @@ const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
           />
         </div>
       )}
-      <ReactMarkdown components={mdComponents}>
-        {typeof message.content === "string"
-          ? message.content
-          : JSON.stringify(message.content)}
+      
+      <ReactMarkdown 
+        components={{
+          ...mdComponents,
+          // Override the link component to handle RAG citations differently
+          a: ({ children, href, ...props }) => {
+            // Check if this is a RAG citation (might have different format)
+            if (href && href.includes('contextual') || !href) {
+              return <span className="text-orange-500 bg-yellow-50 rounded px-1 font-bold mx-1">{children}</span>;
+            }
+            // Default web citation handling
+            return (
+              <Badge className="text-xs mx-0.5">
+                <a
+                  className="text-blue-400 hover:text-blue-300 text-xs"
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  {...props}
+                >
+                  {children}
+                </a>
+              </Badge>
+            );
+          },
+          sup: ({ children }) => (
+            <sup className="text-orange-500 bg-yellow-50 rounded px-1 font-bold mx-1">
+              {children}
+            </sup>
+          ),
+        }}
+      >
+        {messageContent}
       </ReactMarkdown>
+
+      {/* RAG Attribution buttons */}
+      {uniqueAttributions.length > 0 && ragAgentId && (
+        <div className="flex flex-row gap-2 mt-3 mb-2 select-none">
+          <span className="text-xs text-neutral-400 mr-2">Sources:</span>
+          {uniqueAttributions.map((attr) => {
+            // Find the retrieval content for this attribution to get the correct message_id
+            const retrievalContent = ragRetrievalContents.find((rc: any) => rc.content_id === attr.content_id);
+            const messageIdForThisAttribution = retrievalContent?.message_id || ragMessageId;
+            
+            return (
+              <button
+                key={attr.content_id}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleAttributionClick(attr.content_id, ragAgentId, messageIdForThisAttribution);
+                }}
+                className="text-orange-500 bg-orange-50 hover:bg-orange-100 rounded px-2 py-1 text-xs font-medium transition-colors cursor-pointer border border-orange-200"
+                title={`Show content for ID: ${attr.content_id}`}
+              >
+                {attr.number}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <Button
         variant="default"
-        className="cursor-pointer bg-neutral-700 border-neutral-600 text-neutral-300 self-end"
-        onClick={() =>
-          handleCopy(
-            typeof message.content === "string"
-              ? message.content
-              : JSON.stringify(message.content),
-            message.id!
-          )
-        }
+        className="cursor-pointer bg-neutral-700 border-neutral-600 text-neutral-300 self-end mt-2"
+        onClick={() => handleCopy(messageContent, message.id!)}
       >
         {copiedMessageId === message.id ? "Copied" : "Copy"}
         {copiedMessageId === message.id ? <CopyCheck /> : <Copy />}
@@ -240,6 +346,7 @@ export function ChatMessagesView({
   historicalActivities,
 }: ChatMessagesViewProps) {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [screenshot, setScreenshot] = useState<string | null>(null);
 
   const handleCopy = async (text: string, messageId: string) => {
     try {
@@ -248,6 +355,35 @@ export function ChatMessagesView({
       setTimeout(() => setCopiedMessageId(null), 2000); // Reset after 2 seconds
     } catch (err) {
       console.error("Failed to copy text: ", err);
+    }
+  };
+
+  const handleAttributionClick = async (contentId: string, agentId: string, messageId: string) => {
+    console.log("handleAttributionClick: agentId=", agentId, "msgId=", messageId, "contentId=", contentId);
+    if (!messageId || !agentId) {
+      alert("Missing message_id or agent_id in API response.");
+      return;
+    }
+    try {
+      const apiUrl = import.meta.env.DEV 
+        ? "http://localhost:2024" 
+        : "http://localhost:8123";
+      const url = `${apiUrl}/api/retrieval-info?agent_id=${encodeURIComponent(agentId)}&message_id=${encodeURIComponent(messageId)}&content_id=${encodeURIComponent(contentId)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      console.log("Retrieval info response:", data);
+      
+      // Updated to handle new response format
+      const screenshotBase64 = data.page_image;
+      if (screenshotBase64) {
+        setScreenshot(screenshotBase64);
+      } else {
+        setScreenshot(null);
+        alert("No screenshot or page image found in content metadata.");
+      }
+    } catch (err) {
+      setScreenshot(null);
+      alert("Failed to fetch content metadata.");
     }
   };
 
@@ -279,6 +415,7 @@ export function ChatMessagesView({
                       mdComponents={mdComponents}
                       handleCopy={handleCopy}
                       copiedMessageId={copiedMessageId}
+                      handleAttributionClick={handleAttributionClick}  // Add attribution handler
                     />
                   )}
                 </div>
@@ -310,6 +447,26 @@ export function ChatMessagesView({
             )}
         </div>
       </ScrollArea>
+      {screenshot && (
+        <div className="flex flex-col items-center mt-4 p-4 bg-neutral-900 border-t border-neutral-700">
+          <div className="flex justify-between items-center w-full max-w-2xl mb-2">
+            <h3 className="text-sm font-medium text-neutral-300">Source Content</h3>
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={() => setScreenshot(null)}
+              className="text-neutral-400 hover:text-neutral-200"
+            >
+              Close
+            </Button>
+          </div>
+          <img 
+            src={`data:image/png;base64,${screenshot}`} 
+            alt="Source Screenshot" 
+            className="max-w-full max-h-96 border border-neutral-600 rounded-lg shadow-lg"
+          />
+        </div>
+      )}
       <InputForm
         onSubmit={onSubmit}
         isLoading={isLoading}

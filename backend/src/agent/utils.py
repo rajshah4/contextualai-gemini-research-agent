@@ -1,5 +1,89 @@
 from typing import Any, Dict, List
 from langchain_core.messages import AnyMessage, AIMessage, HumanMessage
+import os
+from langchain_google_genai import ChatGoogleGenerativeAI
+from agent.configuration import Configuration
+import requests
+
+# RAG query utility
+API_KEY = os.getenv("CONTEXTUAL_AI_API_KEY")
+AGENT = os.getenv("CONTEXTUAL_AI_AGENT_ID")
+
+if not API_KEY:
+    raise ValueError("CONTEXTUAL_AI_API_KEY environment variable is not set")
+if not AGENT:
+    raise ValueError("CONTEXTUAL_AI_AGENT_ID environment variable is not set")
+
+def query_rag_v3(prompt: str) -> dict:
+    """Search tool for NVIDIA that returns full response with attributions"""
+    
+    try:
+        from contextual import ContextualAI
+        client = ContextualAI(api_key=API_KEY)
+        
+        query_result = client.agents.query.create(
+            agent_id=AGENT,
+            messages=[{
+                "content": prompt,
+                "role": "user"
+            }]
+        )
+        
+        # Extract the content first
+        try:
+            content = query_result.message.content
+            message_id = query_result.message_id
+        except Exception as e:
+            print(f"Debug: Error extracting basic data: {e}")
+            return {
+                "content": str(query_result),
+                "message_id": None,
+                "attributions": [],
+                "retrieval_contents": [],
+                "agent_id": AGENT
+            }
+        
+        # Extract retrieval_contents and attributions
+        retrieval_contents = []
+        attributions = []
+        
+        if hasattr(query_result, 'retrieval_contents') and query_result.retrieval_contents:
+            for rc in query_result.retrieval_contents:
+                retrieval_contents.append({
+                    "content_id": rc.content_id,
+                    "number": rc.number,
+                    "doc_name": rc.doc_name,
+                    "page": rc.page,
+                    "score": rc.score,
+                    "title": rc.doc_name,
+                    "message_id": message_id
+                })
+            
+        if hasattr(query_result, 'attributions') and query_result.attributions:
+            for attr in query_result.attributions:
+                if attr.content_ids:
+                    attributions.extend(attr.content_ids)
+            attributions = list(set(attributions))
+        
+        print(f"Debug: RAG query completed - {len(attributions)} attributions from {len(retrieval_contents)} sources")
+        
+        return {
+            "content": content,
+            "message_id": message_id,
+            "attributions": attributions,
+            "retrieval_contents": retrieval_contents,
+            "agent_id": AGENT
+        }
+        
+    except Exception as e:
+        print(f"Debug: RAG query error: {e}")
+        return {
+            "content": f"Error: {e}",
+            "message_id": None,
+            "attributions": [],
+            "retrieval_contents": [],
+            "agent_id": AGENT
+        }
 
 
 def get_research_topic(messages: List[AnyMessage]) -> str:
@@ -164,3 +248,32 @@ def get_citations(response, resolved_urls_map):
                     pass
         citations.append(citation)
     return citations
+
+
+def tool_selection(state, config):
+    configurable = Configuration.from_runnable_config(config)
+    messages = state.get("messages", [])
+    query = messages[-1].content if messages else ""
+    prompt = f"""
+You are an expert research assistant. Given a user query, decide whether it should be answered using a static knowledge base on fortune 500 companies (RAG) or requires up-to-date information from the web.
+
+If the query is about financial information, technical documentation, or specific products (e.g., NVIDIA) from large companies, choose "RAG".
+If the query asks for the latest, most recent, or up-to-date information, choose "web".
+
+Respond with only "RAG" or "web".
+
+User query: {query}
+"""
+    # Use your reasoning model (e.g., Gemini, OpenAI, etc.)
+    llm = ChatGoogleGenerativeAI(
+        model=configurable.reasoning_model,
+        temperature=0,
+        max_retries=2,
+        api_key=os.getenv("GEMINI_API_KEY"),
+    )
+    result = llm.invoke(prompt)
+    research_mode = result.content.strip().lower()
+    if research_mode not in ["rag", "web"]:
+        research_mode = "web"  # fallback
+    state["research_mode"] = research_mode
+    return state
