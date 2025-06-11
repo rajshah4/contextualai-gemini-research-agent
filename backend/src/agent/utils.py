@@ -134,6 +134,9 @@ def insert_citation_markers(text, citations_list):
     Returns:
         str: The text with citation markers inserted.
     """
+    print(f"Debug: insert_citation_markers - Processing {len(citations_list)} citations")
+    print(f"Debug: Original text preview: {text[:200]}...")
+    
     # Sort citations by end_index in descending order.
     # If end_index is the same, secondary sort by start_index descending.
     # This ensures that insertions at the end of the string don't affect
@@ -143,19 +146,31 @@ def insert_citation_markers(text, citations_list):
     )
 
     modified_text = text
-    for citation_info in sorted_citations:
+    for i, citation_info in enumerate(sorted_citations):
         # These indices refer to positions in the *original* text,
         # but since we iterate from the end, they remain valid for insertion
         # relative to the parts of the string already processed.
         end_idx = citation_info["end_index"]
         marker_to_insert = ""
-        for segment in citation_info["segments"]:
-            marker_to_insert += f" [{segment['label']}]({segment['short_url']})"
+        segments = citation_info.get("segments", [])
+        print(f"Debug: Citation {i}: {len(segments)} segments, end_idx={end_idx}")
+        
+        for j, segment in enumerate(segments):
+            label = segment.get('label', 'N/A')
+            short_url = segment.get('short_url', 'N/A')
+            marker = f" [{label}]({short_url})"
+            marker_to_insert += marker
+            print(f"Debug: Segment {j}: label='{label}', short_url='{short_url}', marker='{marker}'")
+        
+        print(f"Debug: Citation {i}: inserting '{marker_to_insert}' at position {end_idx}")
+        print(f"Debug: Text around position {end_idx}: '{modified_text[max(0, end_idx-20):end_idx+20]}'")
+        
         # Insert the citation marker at the original end_idx position
         modified_text = (
             modified_text[:end_idx] + marker_to_insert + modified_text[end_idx:]
         )
 
+    print(f"Debug: Final modified text preview: {modified_text[:300]}...")
     return modified_text
 
 
@@ -234,9 +249,22 @@ def get_citations(response, resolved_urls_map):
                 try:
                     chunk = candidate.grounding_metadata.grounding_chunks[ind]
                     resolved_url = resolved_urls_map.get(chunk.web.uri, None)
+                    
+                    # Improve label generation - use title or fallback to a number
+                    title = getattr(chunk.web, 'title', '') if hasattr(chunk, 'web') else ''
+                    if title:
+                        # Clean up the title - remove file extensions and clean up
+                        label = title.replace('.html', '').replace('.pdf', '').replace('.txt', '')
+                        if len(label) > 30:  # Truncate very long titles
+                            label = label[:30] + "..."
+                    else:
+                        label = f"{ind + 1}"  # Fallback to number
+                    
+                    print(f"Debug: get_citations - chunk {ind}: title='{title}', label='{label}', uri='{chunk.web.uri}', short_url='{resolved_url}'")
+                    
                     citation["segments"].append(
                         {
-                            "label": chunk.web.title.split(".")[:-1][0],
+                            "label": label,
                             "short_url": resolved_url,
                             "value": chunk.web.uri,
                         }
@@ -254,13 +282,26 @@ def tool_selection(state, config):
     configurable = Configuration.from_runnable_config(config)
     messages = state.get("messages", [])
     query = messages[-1].content if messages else ""
+    
+    # Add debug logging to see what query is being processed
+    print(f"Debug: Tool Selection - Processing query: '{query}'")
+    
     prompt = f"""
 You are an expert research assistant. Given a user query, decide whether it should be answered using a static knowledge base on fortune 500 companies (RAG) or requires up-to-date information from the web.
 
-If the query is about financial information, technical documentation, or specific products (e.g., NVIDIA) from large companies, choose "RAG".
-If the query asks for the latest, most recent, or up-to-date information, choose "web".
+Use RAG for:
+- Financial information, earnings, revenue data for major companies
+- Technical documentation or product specifications from large companies
+- Company-specific information (e.g., NVIDIA, Tesla, Microsoft, etc.)
 
-Respond with only "RAG" or "web".
+Use WEB for:
+- Weather information and forecasts
+- Current news, breaking news, recent events
+- Stock prices, market data, real-time information
+- Sports scores, schedules, current events
+- Any query asking for "today", "current", "latest", "recent", or "now"
+
+Respond with only "RAG" or "WEB".
 
 User query: {query}
 """
@@ -273,7 +314,17 @@ User query: {query}
     )
     result = llm.invoke(prompt)
     research_mode = result.content.strip().lower()
-    if research_mode not in ["rag", "web"]:
+    
+    # Add debug logging to see the LLM's decision
+    print(f"Debug: Tool Selection - LLM decision: '{result.content}' -> research_mode: '{research_mode}'")
+    
+    # Normalize the response - accept both "web" and "rag" regardless of case
+    if research_mode in ["web", "rag"]:
+        pass  # Valid mode
+    else:
+        print(f"Debug: Tool Selection - Invalid mode '{research_mode}', defaulting to 'web'")
         research_mode = "web"  # fallback
+    
     state["research_mode"] = research_mode
+    print(f"Debug: Tool Selection - Final research_mode set to: '{research_mode}'")
     return state

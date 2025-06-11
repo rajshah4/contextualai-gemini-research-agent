@@ -145,7 +145,15 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
     )
     # Gets the citations and adds them to the generated text
     citations = get_citations(response, resolved_urls)
+    print(f"Debug: Web Research - Generated {len(citations)} citation groups")
+    for i, citation in enumerate(citations):
+        print(f"Debug: Citation {i}: {len(citation.get('segments', []))} segments")
+        for j, segment in enumerate(citation.get('segments', [])):
+            print(f"Debug: Segment {j}: label='{segment.get('label', 'N/A')}', short_url='{segment.get('short_url', 'N/A')}', value='{segment.get('value', 'N/A')}'")
+    
     modified_text = insert_citation_markers(response.text, citations)
+    print(f"Debug: Web Research - Modified text preview: {modified_text[:200]}...")
+    
     sources_gathered = [item for citation in citations for item in citation["segments"]]
 
     print(f"Debug: Web Research completed - {len(sources_gathered)} sources found")
@@ -306,34 +314,32 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
         configurable = Configuration.from_runnable_config(config)
         reasoning_model = state.get("reasoning_model") or configurable.reasoning_model
 
-        # Format the prompt
-        current_date = get_current_date()
-        formatted_prompt = answer_instructions.format(
-            current_date=current_date,
-            research_topic=get_research_topic(state["messages"]),
-            summaries="\n---\n\n".join(state["research_result"]),
-        )
-
-        # init Reasoning Model, default to Gemini 2.5 Flash
-        llm = ChatGoogleGenerativeAI(
-            model=reasoning_model,
-            temperature=0,
-            max_retries=2,
-            api_key=os.getenv("GEMINI_API_KEY"),
-        )
-        result = llm.invoke(formatted_prompt)
-
+        # Instead of generating a new response, use the research results directly
+        # This preserves the citations that were already inserted
+        combined_research = "\n\n".join(state["research_result"])
+        
+        print(f"Debug: Using combined research results directly (preserves citations)")
+        print(f"Debug: Combined research preview: {combined_research[:200]}...")
+        
         # Replace the short urls with the original urls and add all used urls to the sources_gathered
         unique_sources = []
+        print(f"Debug: Available sources_gathered: {len(state['sources_gathered'])} sources")
+        
+        modified_content = combined_research
         for source in state["sources_gathered"]:
-            if source["short_url"] in result.content:
-                result.content = result.content.replace(
+            print(f"Debug: Checking source - short_url: {source['short_url']}, in content: {source['short_url'] in modified_content}")
+            if source["short_url"] in modified_content:
+                print(f"Debug: Replacing {source['short_url']} with {source['value']}")
+                modified_content = modified_content.replace(
                     source["short_url"], source["value"]
                 )
                 unique_sources.append(source)
+        
+        print(f"Debug: After URL replacement - content preview: {modified_content[:200]}...")
+        print(f"Debug: Unique sources used: {len(unique_sources)}")
 
-        # Create the final AI message with RAG attribution data attached
-        final_message = AIMessage(content=result.content)
+        # Create the final AI message with the preserved citations
+        final_message = AIMessage(content=modified_content)
         
         # Attach RAG attribution data to the message if it exists
         raw_rag_attributions = state.get("rag_attributions", [])
@@ -429,12 +435,18 @@ def fan_out_queries(state: QueryGenerationState, config: RunnableConfig):
     # Get research_mode from state, defaulting to 'rag'
     research_mode = state.get("research_mode", "rag")
     
+    # Add debug logging to see what's happening
+    print(f"Debug: Fan-out queries - research_mode: '{research_mode}', state keys: {list(state.keys())}")
+    
     if research_mode == "web":
         target_node = "web_research"
+        print(f"Debug: Fan-out queries - Routing to web_research")
     elif research_mode == "rag":
         target_node = "rag_research"
+        print(f"Debug: Fan-out queries - Routing to rag_research")
     else:
         target_node = "rag_research"  # Default fallback
+        print(f"Debug: Fan-out queries - Unknown mode '{research_mode}', defaulting to rag_research")
     
     return [
         Send(target_node, {"search_query": [query], "id": [idx]})

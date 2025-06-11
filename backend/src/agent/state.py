@@ -47,6 +47,7 @@ class Query(TypedDict):
 
 class QueryGenerationState(TypedDict):
     query_list: list[Query]
+    research_mode: str  # Add research_mode field so fan_out_queries can access it
 
 
 class WebSearchState(TypedDict):

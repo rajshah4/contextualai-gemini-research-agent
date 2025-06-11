@@ -257,11 +257,11 @@ const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
           ...mdComponents,
           // Override the link component to handle RAG citations differently
           a: ({ children, href, ...props }) => {
-            // Check if this is a RAG citation (might have different format)
-            if (href && href.includes('contextual') || !href) {
+            // Check if this is a RAG citation (no href or href contains 'contextual')
+            if (!href || href.includes('contextual')) {
               return <span className="text-orange-500 bg-yellow-50 rounded px-1 font-bold mx-1">{children}</span>;
             }
-            // Default web citation handling
+            // Default web citation handling for real URLs
             return (
               <Badge className="text-xs mx-0.5">
                 <a

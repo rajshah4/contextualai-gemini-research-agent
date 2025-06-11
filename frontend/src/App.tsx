@@ -18,6 +18,14 @@ interface WebResearchEvent {
   };
 }
 
+interface RagResearchEvent {
+  rag_research?: {
+    research_result?: string[];
+    rag_attributions?: string[];
+    rag_retrieval_contents?: Array<{ [key: string]: unknown }>;
+  };
+}
+
 interface ReflectionEvent {
   reflection?: {
     is_sufficient: boolean;
@@ -29,7 +37,7 @@ interface FinalizeAnswerEvent {
   finalize_answer?: Record<string, unknown>;
 }
 
-type StreamEvent = GenerateQueryEvent & WebResearchEvent & ReflectionEvent & FinalizeAnswerEvent;
+type StreamEvent = GenerateQueryEvent & WebResearchEvent & RagResearchEvent & ReflectionEvent & FinalizeAnswerEvent;
 
 export default function App() {
   const [processedEventsTimeline, setProcessedEventsTimeline] = useState<
@@ -74,6 +82,14 @@ export default function App() {
           data: `Gathered ${numSources} sources. Related to: ${
             exampleLabels || "N/A"
           }.`,
+        };
+      } else if (event.rag_research) {
+        const attributions = event.rag_research.rag_attributions || [];
+        const retrievalContents = event.rag_research.rag_retrieval_contents || [];
+        const numSources = retrievalContents.length;
+        processedEvent = {
+          title: "RAG Research",
+          data: `Retrieved ${numSources} sources from knowledge base with ${attributions.length} citations.`,
         };
       } else if (event.reflection) {
         processedEvent = {
