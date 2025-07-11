@@ -46,6 +46,13 @@ class Configuration(BaseModel):
         },
     )
 
+    synthesis_model: str = Field(
+        default="gemini-1.5-pro-latest",
+        metadata={
+            "description": "The name of the language model to use for the agent's final answer synthesis."
+        },
+    )
+
     @classmethod
     def from_runnable_config(
         cls, config: Optional[RunnableConfig] = None

@@ -29,6 +29,9 @@ class OverallState(TypedDict):
     rag_retrieval_contents: Annotated[list, operator.add]
     rag_message_id: Annotated[list, operator.add]
     rag_agent_id: Annotated[list, operator.add]
+    # Add default values for fields sent from the frontend
+    follow_up_query_mode_list: list[dict] = field(default_factory=list)
+    knowledge_gap: str = ""
 
 
 class ReflectionState(TypedDict):

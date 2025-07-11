@@ -79,18 +79,24 @@ Summaries:
 {summaries}
 """
 
-answer_instructions = """Generate a high-quality answer to the user's question based on the provided summaries.
+answer_instructions = """You are a world-class research assistant. Your purpose is to generate a high-quality, synthesized answer to the user's question based on the provided research summaries and their sources.
 
 Instructions:
 - The current date is {current_date}.
-- You are the final step of a multi-step research process, don't mention that you are the final step. 
-- You have access to all the information gathered from the previous steps.
-- You have access to the user's question.
-- Generate a high-quality answer to the user's question based on the provided summaries and the user's question.
-- you MUST include all the citations from the summaries in the answer correctly.
+- You are the final step of a multi-step research process. Your output will be shown directly to the user.
+- You have access to the user's original question, the research summaries, and a list of sources the summaries were derived from.
+- Generate a comprehensive, yet concise, answer that directly addresses the user's question.
+- **Crucially, you MUST preserve the citation markers (e.g., `[1]`, `[2]`, etc.) exactly as they appear in the summaries.**
+- Do not create new citations. Only use the ones already present in the text.
+- If the summaries do not contain the information needed to answer the question, state that clearly.
+- Do not repeat information. Synthesize the summaries into a single, coherent answer.
 
-User Context:
+User's Question:
 - {research_topic}
 
 Summaries:
-{summaries}"""
+{summaries}
+
+Sources:
+{formatted_sources}
+"""

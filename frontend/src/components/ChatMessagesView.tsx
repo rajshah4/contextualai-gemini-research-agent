@@ -11,29 +11,14 @@ import { Badge } from "@/components/ui/badge";
 import {
   ActivityTimeline,
   ProcessedEvent,
-} from "@/components/ActivityTimeline"; // Assuming ActivityTimeline is in the same dir or adjust path
+} from "@/components/ActivityTimeline";
 
-// Markdown component props type from former ReportView
 type MdComponentProps = {
   className?: string;
   children?: ReactNode;
   [key: string]: any;
 };
 
-// Add types for RAG attribution data
-interface RagAttributionData {
-  attributions?: Array<{
-    content_ids?: string[];
-  }>;
-  retrieval_contents?: Array<{
-    content_id: string;
-    number: string | number;
-  }>;
-  message_id?: string;
-  agent_id?: string;
-}
-
-// Markdown components (from former ReportView.tsx)
 const mdComponents = {
   h1: ({ className, children, ...props }: MdComponentProps) => (
     <h1 className={cn("text-2xl font-bold mt-4 mb-2", className)} {...props}>
@@ -56,17 +41,15 @@ const mdComponents = {
     </p>
   ),
   a: ({ className, children, href, ...props }: MdComponentProps) => (
-    <Badge className="text-xs mx-0.5">
-      <a
-        className={cn("text-blue-400 hover:text-blue-300 text-xs", className)}
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        {...props}
-      >
-        {children}
-      </a>
-    </Badge>
+    <a
+      className={cn("text-blue-400 hover:text-blue-300", className)}
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      {...props}
+    >
+      {children}
+    </a>
   ),
   ul: ({ className, children, ...props }: MdComponentProps) => (
     <ul className={cn("list-disc pl-6 mb-3", className)} {...props}>
@@ -147,13 +130,11 @@ const mdComponents = {
   ),
 };
 
-// Props for HumanMessageBubble
 interface HumanMessageBubbleProps {
   message: Message;
   mdComponents: typeof mdComponents;
 }
 
-// HumanMessageBubble Component
 const HumanMessageBubble: React.FC<HumanMessageBubbleProps> = ({
   message,
   mdComponents,
@@ -171,7 +152,6 @@ const HumanMessageBubble: React.FC<HumanMessageBubbleProps> = ({
   );
 };
 
-// Props for AiMessageBubble
 interface AiMessageBubbleProps {
   message: Message;
   historicalActivity: ProcessedEvent[] | undefined;
@@ -184,7 +164,6 @@ interface AiMessageBubbleProps {
   handleAttributionClick: (contentId: string, agentId: string, messageId: string) => void;
 }
 
-// AiMessageBubble Component
 const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
   message,
   historicalActivity,
@@ -196,50 +175,62 @@ const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
   copiedMessageId,
   handleAttributionClick,
 }) => {
-  // Determine which activity events to show and if it's for a live loading message
   const activityForThisBubble =
     isLastMessage && isOverallLoading ? liveActivity : historicalActivity;
   const isLiveActivityForThisBubble = isLastMessage && isOverallLoading;
 
-  // Debug: Log the message object to see what data is available
-  console.log("Debug: Message object:", message);
-  console.log("Debug: Message keys:", Object.keys(message));
-
-  // Extract RAG attribution data from message if available
-  const ragAttributions = (message as any)?.additional_kwargs?.rag_attributions || [];
-  const ragRetrievalContents = (message as any)?.additional_kwargs?.rag_retrieval_contents || [];
-  const ragMessageId = (message as any)?.additional_kwargs?.rag_message_id;
-  const ragAgentId = (message as any)?.additional_kwargs?.rag_agent_id;
-
-  // Debug: Log extracted RAG data
-  console.log("Debug: ragAttributions:", ragAttributions);
-  console.log("Debug: ragRetrievalContents:", ragRetrievalContents);
-  console.log("Debug: ragMessageId:", ragMessageId);
-  console.log("Debug: ragAgentId:", ragAgentId);
-
-  // Process unique attributions - ragAttributions is an array of content_id strings
-  const uniqueAttributions: { content_id: string; number: string | number }[] = [];
-  const seen = new Set<string>();
-  
-  if (ragAttributions && ragAttributions.length > 0) {
-    // ragAttributions is already an array of content_id strings
-    ragAttributions.forEach((contentId: string) => {
-      if (!seen.has(contentId)) {
-        seen.add(contentId);
-        const retrieval = ragRetrievalContents.find((rc: any) => rc.content_id === contentId);
-        uniqueAttributions.push({ 
-          content_id: contentId, 
-          number: retrieval ? retrieval.number : contentId 
-        });
-      }
-    });
-  }
-
-  console.log("Debug: uniqueAttributions:", uniqueAttributions);
-
-  const messageContent = typeof message.content === "string" 
+  const fullContent = typeof message.content === "string" 
     ? message.content 
     : JSON.stringify(message.content);
+    
+  const ragAgentId = (message as any)?.additional_kwargs?.rag_agent_id?.[0];
+  const ragMessageId = (message as any)?.additional_kwargs?.rag_message_id?.[0];
+
+  const [mainContent, sourcesContent] = fullContent.split('**Sources:**');
+
+  const renderSources = (sources: string) => {
+    if (!sources) return null;
+    return sources.split('\n').map((line, index) => {
+      if (!line.trim()) return null;
+
+      const match = line.match(/\[(\d+)\]:\s*(.*)/);
+      if (match) {
+        const number = match[1];
+        const text = match[2];
+
+        const contentIdMatch = text.match(/Content ID: (.*)/);
+        if (contentIdMatch) {
+          const contentId = contentIdMatch[1].trim();
+          return (
+            <div key={index} className="text-xs mb-1">
+              <button
+                onClick={() => handleAttributionClick(contentId, ragAgentId, ragMessageId)}
+                className="text-orange-400 hover:underline text-left bg-transparent border-none p-0 m-0 cursor-pointer"
+                style={{ background: "none", border: "none", padding: 0, margin: 0 }}
+                title="Click to preview source"
+              >
+                {`[${number}] ${text}`}
+                <span className="ml-1" title="Show preview">🔍</span>
+              </button>
+            </div>
+          );
+        } else {
+          const urlMatch = text.match(/Web Source: (.*)/);
+          if (urlMatch) {
+            const url = urlMatch[1].trim();
+            return (
+              <div key={index} className="text-xs mb-1">
+                <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+                  {`[${number}] ${text}`}
+                </a>
+              </div>
+            );
+          }
+        }
+      }
+      return <div key={index} className="text-xs">{line}</div>;
+    });
+  };
 
   return (
     <div className={`relative break-words flex flex-col`}>
@@ -252,74 +243,25 @@ const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
         </div>
       )}
       
-      <ReactMarkdown 
-        components={{
-          ...mdComponents,
-          // Override the link component to handle RAG citations differently
-          a: ({ children, href, ...props }) => {
-            // Check if this is a RAG citation (no href or href contains 'contextual')
-            if (!href || href.includes('contextual')) {
-              return <span className="text-orange-500 bg-yellow-50 rounded px-1 font-bold mx-1">{children}</span>;
-            }
-            // Default web citation handling for real URLs
-            return (
-              <Badge className="text-xs mx-0.5">
-                <a
-                  className="text-blue-400 hover:text-blue-300 text-xs"
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  {...props}
-                >
-                  {children}
-                </a>
-              </Badge>
-            );
-          },
-          sup: ({ children }) => (
-            <sup className="text-orange-500 bg-yellow-50 rounded px-1 font-bold mx-1">
-              {children}
-            </sup>
-          ),
-        }}
-      >
-        {messageContent}
+      <ReactMarkdown components={mdComponents}>
+        {mainContent}
       </ReactMarkdown>
 
-      {/* RAG Attribution buttons */}
-      {uniqueAttributions.length > 0 && ragAgentId && (
-        <div className="flex flex-row gap-2 mt-3 mb-2 select-none">
-          <span className="text-xs text-neutral-400 mr-2">Sources:</span>
-          {uniqueAttributions.map((attr) => {
-            // Find the retrieval content for this attribution to get the correct message_id
-            const retrievalContent = ragRetrievalContents.find((rc: any) => rc.content_id === attr.content_id);
-            const messageIdForThisAttribution = retrievalContent?.message_id || ragMessageId;
-            
-            return (
-              <button
-                key={attr.content_id}
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleAttributionClick(attr.content_id, ragAgentId, messageIdForThisAttribution);
-                }}
-                className="text-orange-500 bg-orange-50 hover:bg-orange-100 rounded px-2 py-1 text-xs font-medium transition-colors cursor-pointer border border-orange-200"
-                title={`Show content for ID: ${attr.content_id}`}
-              >
-                {attr.number}
-              </button>
-            );
-          })}
+      {sourcesContent && (
+        <div className="mt-4 pt-3 border-t border-neutral-700">
+          <h3 className="text-sm font-bold mb-2 text-neutral-300">Sources</h3>
+          <div className="text-neutral-400 space-y-1 text-xs">
+            {renderSources(sourcesContent)}
+          </div>
         </div>
       )}
 
       <Button
         variant="default"
         className="cursor-pointer bg-neutral-700 border-neutral-600 text-neutral-300 self-end mt-2"
-        onClick={() => handleCopy(messageContent, message.id!)}
+        onClick={() => handleCopy(fullContent, message.id!)}
       >
-        {copiedMessageId === message.id ? "Copied" : "Copy"}
+        {copiedMessageId === message.id ? "Copied" : "Copy Full Response"}
         {copiedMessageId === message.id ? <CopyCheck /> : <Copy />}
       </Button>
     </div>
@@ -373,9 +315,9 @@ export function ChatMessagesView({
       const data = await res.json();
       console.log("Retrieval info response:", data);
       
-      // Updated to handle new response format
-      const screenshotBase64 = data.page_image;
+      const screenshotBase64 = data.page_image || data.page_img;
       if (screenshotBase64) {
+        console.log("Setting screenshot:", screenshotBase64);
         setScreenshot(screenshotBase64);
       } else {
         setScreenshot(null);
@@ -388,68 +330,74 @@ export function ChatMessagesView({
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <ScrollArea className="flex-grow" ref={scrollAreaRef}>
-        <div className="p-4 md:p-6 space-y-2 max-w-4xl mx-auto pt-16">
-          {messages.map((message, index) => {
-            const isLast = index === messages.length - 1;
-            return (
-              <div key={message.id || `msg-${index}`} className="space-y-3">
-                <div
-                  className={`flex items-start gap-3 ${
-                    message.type === "human" ? "justify-end" : ""
-                  }`}
-                >
-                  {message.type === "human" ? (
-                    <HumanMessageBubble
-                      message={message}
-                      mdComponents={mdComponents}
-                    />
-                  ) : (
-                    <AiMessageBubble
-                      message={message}
-                      historicalActivity={historicalActivities[message.id!]}
-                      liveActivity={liveActivityEvents} // Pass global live events
-                      isLastMessage={isLast}
-                      isOverallLoading={isLoading} // Pass global loading state
-                      mdComponents={mdComponents}
-                      handleCopy={handleCopy}
-                      copiedMessageId={copiedMessageId}
-                      handleAttributionClick={handleAttributionClick}  // Add attribution handler
-                    />
-                  )}
-                </div>
-              </div>
-            );
-          })}
-          {isLoading &&
-            (messages.length === 0 ||
-              messages[messages.length - 1].type === "human") && (
-              <div className="flex items-start gap-3 mt-3">
-                {" "}
-                {/* AI message row structure */}
-                <div className="relative group max-w-[85%] md:max-w-[80%] rounded-xl p-3 shadow-sm break-words bg-neutral-800 text-neutral-100 rounded-bl-none w-full min-h-[56px]">
-                  {liveActivityEvents.length > 0 ? (
-                    <div className="text-xs">
-                      <ActivityTimeline
-                        processedEvents={liveActivityEvents}
-                        isLoading={true}
+    <div className="flex flex-row h-full w-full overflow-x-hidden">
+      <div className="flex-grow flex flex-col h-full min-w-0">
+        <ScrollArea className="flex-grow" ref={scrollAreaRef}>
+          <div className="p-2 md:p-3 space-y-2 w-full pt-12">
+            {messages.map((message, index) => {
+              const isLast = index === messages.length - 1;
+              return (
+                <div key={message.id || `msg-${index}`} className="space-y-3">
+                  <div
+                    className={`flex items-start gap-3 ${
+                      message.type === "human" ? "justify-end" : ""
+                    }`}
+                  >
+                    {message.type === "human" ? (
+                      <HumanMessageBubble
+                        message={message}
+                        mdComponents={mdComponents}
                       />
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-start h-full">
-                      <Loader2 className="h-5 w-5 animate-spin text-neutral-400 mr-2" />
-                      <span>Processing...</span>
-                    </div>
-                  )}
+                    ) : (
+                      <AiMessageBubble
+                        message={message}
+                        historicalActivity={historicalActivities[message.id!]}
+                        liveActivity={liveActivityEvents}
+                        isLastMessage={isLast}
+                        isOverallLoading={isLoading}
+                        mdComponents={mdComponents}
+                        handleCopy={handleCopy}
+                        copiedMessageId={copiedMessageId}
+                        handleAttributionClick={handleAttributionClick}
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-        </div>
-      </ScrollArea>
+              );
+            })}
+            {isLoading &&
+              (messages.length === 0 ||
+                messages[messages.length - 1].type === "human") && (
+                <div className="flex items-start gap-3 mt-3">
+                  <div className="relative group max-w-[85%] md:max-w-[80%] rounded-xl p-3 shadow-sm break-words bg-neutral-800 text-neutral-100 rounded-bl-none w-full min-h-[56px]">
+                    {liveActivityEvents.length > 0 ? (
+                      <div className="text-xs">
+                        <ActivityTimeline
+                          processedEvents={liveActivityEvents}
+                          isLoading={true}
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-start h-full">
+                        <Loader2 className="h-5 w-5 animate-spin text-neutral-400 mr-2" />
+                        <span>Processing...</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+          </div>
+        </ScrollArea>
+        <InputForm
+          onSubmit={onSubmit}
+          isLoading={isLoading}
+          onCancel={onCancel}
+          hasHistory={messages.length > 0}
+        />
+      </div>
       {screenshot && (
-        <div className="flex flex-col items-center mt-4 p-4 bg-neutral-900 border-t border-neutral-700">
-          <div className="flex justify-between items-center w-full max-w-2xl mb-2">
+        <div className="w-[800px] max-w-[1200px] min-w-[400px] flex flex-col items-center p-2 bg-neutral-900 border-l border-neutral-700 z-10 overflow-auto">
+          <div className="flex justify-between items-center w-full mb-2">
             <h3 className="text-sm font-medium text-neutral-300">Source Content</h3>
             <Button 
               variant="ghost" 
@@ -460,19 +408,31 @@ export function ChatMessagesView({
               Close
             </Button>
           </div>
-          <img 
-            src={`data:image/png;base64,${screenshot}`} 
-            alt="Source Screenshot" 
-            className="max-w-full max-h-96 border border-neutral-600 rounded-lg shadow-lg"
-          />
+          <div className="w-full h-full flex justify-center items-center overflow-auto">
+            <div className="flex gap-2 mb-2">
+              <button
+                onClick={() => {
+                  const win = window.open();
+                  if (win) {
+                    win.document.write(
+                      `<img src="data:image/png;base64,${screenshot}" style='width:100%;height:auto;display:block;margin:auto;' />`
+                    );
+                    win.document.title = "Source Screenshot";
+                  }
+                }}
+                className="px-2 py-1 bg-neutral-700 rounded text-white"
+              >
+                Open in New Tab
+              </button>
+            </div>
+            <img
+              src={`data:image/png;base64,${screenshot}`}
+              alt="Source Screenshot"
+              className="max-w-none max-h-[90vh] object-contain border border-neutral-600 rounded-lg shadow-lg"
+            />
+          </div>
         </div>
       )}
-      <InputForm
-        onSubmit={onSubmit}
-        isLoading={isLoading}
-        onCancel={onCancel}
-        hasHistory={messages.length > 0}
-      />
     </div>
   );
 }

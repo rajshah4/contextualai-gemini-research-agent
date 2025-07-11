@@ -3,7 +3,7 @@
 help:
 	@echo "Available commands:"
 	@echo "  make dev-frontend    - Starts the frontend development server (Vite)"
-	@echo "  make dev-backend     - Starts the backend development server (Uvicorn with reload)"
+	@echo "  make dev-backend     - Starts the backend development server (LangGraph)"
 	@echo "  make dev             - Starts both frontend and backend development servers"
 
 dev-frontend:
@@ -12,9 +12,9 @@ dev-frontend:
 
 dev-backend:
 	@echo "Starting backend development server..."
-	@cd backend && langgraph dev
+	@conda run -n py3.11 langgraph dev --port 2024
 
 # Run frontend and backend concurrently
 dev:
 	@echo "Starting both frontend and backend development servers..."
-	@make dev-frontend & make dev-backend 
+	@make dev-frontend & make dev-backend

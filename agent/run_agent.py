@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from agent.graph import graph
 from agent.configuration import Configuration
 from agent.state import OverallState
