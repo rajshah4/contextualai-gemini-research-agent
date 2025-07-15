@@ -33,7 +33,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       />
     </div>
     <p className="text-xs text-neutral-500">
-      Powered by Google Gemini, Contextual AI, and LangChain LangGraph.
+      Powered by Google Gemini, <span className="text-orange-500 font-medium">Contextual AI </span>, and LangChain LangGraph.
     </p>
   </div>
 );
