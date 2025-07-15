@@ -36,7 +36,7 @@ const mdComponents = {
     </h3>
   ),
   p: ({ className, children, ...props }: MdComponentProps) => (
-    <p className={cn("mb-3 leading-7", className)} {...props}>
+    <p className={cn("mb-3 leading-7 break-words overflow-wrap-anywhere", className)} {...props}>
       {children}
     </p>
   ),
@@ -175,9 +175,15 @@ const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
   copiedMessageId,
   handleAttributionClick,
 }) => {
-  const activityForThisBubble =
-    isLastMessage && isOverallLoading ? liveActivity : historicalActivity;
-  const isLiveActivityForThisBubble = isLastMessage && isOverallLoading;
+    const activityForThisBubble =
+    isLastMessage && isOverallLoading 
+      ? liveActivity 
+      : historicalActivity && historicalActivity.length > 0 
+        ? historicalActivity 
+        : (isLastMessage ? liveActivity : undefined);
+  const isLiveActivityForThisBubble = isLastMessage && (isOverallLoading || !historicalActivity || historicalActivity.length === 0);
+
+
 
   const fullContent = typeof message.content === "string" 
     ? message.content 
@@ -202,10 +208,10 @@ const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
         if (contentIdMatch) {
           const contentId = contentIdMatch[1].trim();
           return (
-            <div key={index} className="text-xs mb-1">
+            <div key={index} className="text-xs mb-1 break-words">
               <button
                 onClick={() => handleAttributionClick(contentId, ragAgentId, ragMessageId)}
-                className="text-orange-400 hover:underline text-left bg-transparent border-none p-0 m-0 cursor-pointer"
+                className="text-orange-400 hover:underline text-left bg-transparent border-none p-0 m-0 cursor-pointer break-words w-full"
                 style={{ background: "none", border: "none", padding: 0, margin: 0 }}
                 title="Click to preview source"
               >
@@ -219,8 +225,8 @@ const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
           if (urlMatch) {
             const url = urlMatch[1].trim();
             return (
-              <div key={index} className="text-xs mb-1">
-                <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+              <div key={index} className="text-xs mb-1 break-words">
+                <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline break-words">
                   {`[${number}] ${text}`}
                 </a>
               </div>
@@ -228,12 +234,14 @@ const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
           }
         }
       }
-      return <div key={index} className="text-xs">{line}</div>;
+      return <div key={index} className="text-xs break-words">{line}</div>;
     });
   };
 
+
+
   return (
-    <div className={`relative break-words flex flex-col`}>
+    <div className={`relative break-words flex flex-col w-full`}>
       {activityForThisBubble && activityForThisBubble.length > 0 && (
         <div className="mb-3 border-b border-neutral-700 pb-3 text-xs">
           <ActivityTimeline
@@ -250,7 +258,7 @@ const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
       {sourcesContent && (
         <div className="mt-4 pt-3 border-t border-neutral-700">
           <h3 className="text-sm font-bold mb-2 text-neutral-300">Sources</h3>
-          <div className="text-neutral-400 space-y-1 text-xs">
+          <div className="text-neutral-400 space-y-1 text-xs break-words overflow-hidden">
             {renderSources(sourcesContent)}
           </div>
         </div>

@@ -33,11 +33,21 @@ interface ReflectionEvent {
   };
 }
 
-interface FinalizeAnswerEvent {
-  finalize_answer?: Record<string, unknown>;
+interface PrepareAnswerEvent {
+  prepare_final_answer?: Record<string, unknown>;
 }
 
-type StreamEvent = GenerateQueryEvent & WebResearchEvent & RagResearchEvent & ReflectionEvent & FinalizeAnswerEvent;
+interface SynthesizeAnswerEvent {
+  synthesize_final_answer?: Record<string, unknown>;
+}
+
+interface ToolSelectionEvent {
+  tool_selection?: {
+    research_mode?: string;
+  };
+}
+
+type StreamEvent = GenerateQueryEvent & WebResearchEvent & RagResearchEvent & ReflectionEvent & PrepareAnswerEvent & SynthesizeAnswerEvent & ToolSelectionEvent;
 
 export default function App() {
   const [processedEventsTimeline, setProcessedEventsTimeline] = useState<
@@ -74,7 +84,7 @@ export default function App() {
         const sources = event.web_research.sources_gathered || [];
         const numSources = sources.length;
         const uniqueLabels = [
-          ...new Set(sources.map((s) => s.label).filter(Boolean)),
+          ...new Set(sources.map((s: any) => s.label).filter(Boolean)),
         ];
         const exampleLabels = uniqueLabels.slice(0, 3).join(", ");
         processedEvent = {
@@ -100,10 +110,20 @@ export default function App() {
                 ", "
               ) || "additional queries"}`,
         };
-      } else if (event.finalize_answer) {
+      } else if (event.tool_selection) {
         processedEvent = {
-          title: "Finalizing Answer",
-          data: "Composing and presenting the final answer.",
+          title: "Tool Selection",
+          data: `Selecting research method: ${event.tool_selection.research_mode || "determining approach"}`,
+        };
+      } else if (event.prepare_final_answer) {
+        processedEvent = {
+          title: "Preparing Final Answer",
+          data: "Consolidating research results and preparing response.",
+        };
+      } else if (event.synthesize_final_answer) {
+        processedEvent = {
+          title: "Synthesizing Answer",
+          data: "Creating comprehensive answer from research findings.",
         };
         hasFinalizeEventOccurredRef.current = true;
       }
@@ -131,7 +151,8 @@ export default function App() {
     if (
       hasFinalizeEventOccurredRef.current &&
       !thread.isLoading &&
-      thread.messages.length > 0
+      thread.messages.length > 0 &&
+      processedEventsTimeline.length > 0
     ) {
       const lastMessage = thread.messages[thread.messages.length - 1];
       if (lastMessage && lastMessage.type === "ai" && lastMessage.id) {
@@ -139,8 +160,8 @@ export default function App() {
           ...prev,
           [lastMessage.id!]: [...processedEventsTimeline],
         }));
+        hasFinalizeEventOccurredRef.current = false;
       }
-      hasFinalizeEventOccurredRef.current = false;
     }
   }, [thread.messages, thread.isLoading, processedEventsTimeline]);
 
@@ -196,7 +217,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-neutral-800 text-neutral-100 font-sans antialiased">
-      <main className="flex-1 flex flex-col overflow-hidden max-w-4xl mx-auto w-full">
+      <main className="flex-1 flex flex-col overflow-hidden max-w-6xl mx-auto w-full">
         <div
           className={`flex-1 overflow-y-auto ${
             thread.messages.length === 0 ? "flex" : ""
